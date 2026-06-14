@@ -12,7 +12,7 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 
-public class JUpdaterCore extends JUpdater {
+class JUpdaterCore extends JUpdater {
 
 
     private static JUpdaterCore var1xi;

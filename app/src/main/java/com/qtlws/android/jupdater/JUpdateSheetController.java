@@ -3,7 +3,7 @@ package com.qtlws.android.jupdater;
 import android.app.Activity;
 import android.content.Context;
 
-public class JUpdateSheetController {
+class JUpdateSheetController {
 
     private static boolean hasSheetShown = false;
     private static String updateUrl;

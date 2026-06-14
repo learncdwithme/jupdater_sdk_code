@@ -4,8 +4,8 @@ plugins {
     id("com.android.library")
 }
 
-var versionName = "1.0.2"
-var versionCode = 3
+var versionName = "1.1.1"
+var versionCode = 4
 
 android {
     namespace = "com.qtlws.android.jupdater"

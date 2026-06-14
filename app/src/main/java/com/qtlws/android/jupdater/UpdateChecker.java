@@ -29,6 +29,7 @@ public class UpdateChecker {
             HttpURLConnection connection = getHttpURLConnection(config, packageName, currentVersionCode);
 
             int responseCode = connection.getResponseCode();
+            String responseMessage = connection.getResponseMessage();
 
             if (responseCode == HttpURLConnection.HTTP_OK) {
                 BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
@@ -47,33 +48,41 @@ public class UpdateChecker {
 
                 String serverPid = jsonObject.getString("pid");
                 int serverVersionCode = jsonObject.getInt("version_code");
+
                 context.getSharedPreferences(var34sp, Context.MODE_PRIVATE).edit().
                         putInt(var35sp, serverVersionCode).apply();
 
-                if (!packageName.equals(serverPid)){
+                if (!packageName.equals(serverPid)) {
                     throw new Exception("Package Name doesn't match");
                 }
 
-                JLogger.debugLog("Versions no : "+serverVersionCode);
-                JLogger.debugLog("Versions no : "+currentVersionCode);
+                JLogger.debugLog("Versions no : " + serverVersionCode);
+                JLogger.debugLog("Versions no : " + currentVersionCode);
 
                 if (serverVersionCode > currentVersionCode) {
+                    if (config.isUsingManagedServer()) {
+                        boolean isBlocked = jsonObject.getBoolean("is_blocked");
+                        String updateUrl = jsonObject.getString("update_url");
+                        int force_update_gap = jsonObject.getInt("force_update_gap");
+                        config.setUpdatedApkUrl(updateUrl);
+                        config.enableForceUpdate(force_update_gap);
+                    }
                     boolean isForce = config.isForceUpdateEnabled()
                             && (serverVersionCode - currentVersionCode >= config.getForceUpdateThreshold());
+
 
                     JLogger.debugLog("Launching " + (isForce ? "FORCE" : "NON-FORCE") + " update screen");
                     JUpdaterCore.getInstance().launchUpdateScreen(isForce);
 
-                }else {
+                } else {
                     JLogger.debugLog("You are using Latest version of the application.");
                 }
 
             } else {
-                JLogger.errorLog("Server response error: " + responseCode);
+                JLogger.errorLog("Server response error: " + responseCode + "with message " +responseMessage);
             }
 
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             JLogger.errorLog("Error while checking update: " + e.getLocalizedMessage());
             if (e instanceof java.net.UnknownHostException ||
                     e instanceof java.net.SocketTimeoutException ||
@@ -106,14 +115,20 @@ public class UpdateChecker {
                 + "?pid=" + packageName
                 + "&version_code=" + currentVersionCode;
 
-        JLogger.debugLog("JUpdater Final Url : "+urlString);
+
+        JLogger.debugLog("JUpdater Final Url : " + urlString);
 
         URL url = new URL(urlString);
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-
-        connection.setRequestMethod("GET");
-        connection.setConnectTimeout(15000); // 5 seconds
-        connection.setReadTimeout(15000);    // 5 seconds
+        if (config.isUsingManagedServer()) {
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("x-api-key", config.getApiKey());
+            connection.setRequestProperty("Content-Type", "application/json");
+        } else {
+            connection.setRequestMethod("GET");
+        }
+        connection.setConnectTimeout(15000); // 15 seconds
+        connection.setReadTimeout(15000);    // 15 seconds
         return connection;
     }
 

@@ -1,6 +1,5 @@
 package com.qtlws.android.jupdater;
 
-import android.animation.ObjectAnimator;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.net.Uri;

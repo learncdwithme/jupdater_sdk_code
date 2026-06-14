@@ -3,7 +3,5 @@
     <style name="Base.Theme.Jupdater" parent="Theme.Material3.DayNight.NoActionBar">
 
     </style>
-
-
     <style name="Theme.Jupdater" parent="Base.Theme.Jupdater" />
 </resources>

@@ -12,7 +12,7 @@ import androidx.annotation.NonNull;
 
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 
-public class JUpdateBottomSheet extends BottomSheetDialog {
+class JUpdateBottomSheet extends BottomSheetDialog {
 
     public JUpdateBottomSheet(@NonNull Context context, String apkUrl) {
         super(context);
