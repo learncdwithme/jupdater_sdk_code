@@ -8,202 +8,161 @@
 
 package com.qtlws.android.jupdater;
 
-import static com.qtlws.android.jupdater.Constants.var35sp;
-import static com.qtlws.android.jupdater.Constants.var34sp;
 
-import android.content.Context;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-import android.os.Build;
+import android.net.Uri;
+
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
-import java.io.DataOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.Map;
+import java.nio.charset.StandardCharsets;
+
 
 public class UpdateChecker {
+    private static final int CONNECT_TIMEOUT_MS = 10_000;
+    private static final int READ_TIMEOUT_MS = 10_000;
+    private static final int MAX_RESPONSE_BYTES = 64 * 1024;
 
-    public static void checkForUpdate(Context context, JUpdaterConfig config, Map<String, Object> data) {
+    private UpdateChecker() {
+    }
+
+    /**
+     * Non-200 answer from the server.
+     */
+    static final class HttpException extends IOException {
+        final int code;
+
+        HttpException(int code) {
+            super("HTTP " + code);
+            this.code = code;
+        }
+    }
+
+    static final class Response {
+        final String pid;
+        final String title;
+        final String message;
+        final int versionCode;
+        final boolean blocked;
+        final boolean isForceUpdate;
+        @Nullable
+        final String updateUrl;
+        final int forceGap;      // already >= 1
+
+        Response(String pid, int versionCode, boolean blocked, @Nullable String updateUrl, int forceGap, String title, String message, boolean isForceUpdate) {
+            this.pid = pid;
+            this.versionCode = versionCode;
+            this.blocked = blocked;
+            this.updateUrl = updateUrl;
+            this.forceGap = forceGap;
+            this.isForceUpdate = isForceUpdate;
+            this.title = title;
+            this.message = message;
+        }
+    }
+
+    /**
+     * @param payload JSON body for managed mode (POST), or {@code null} for custom mode (GET with
+     *                only pid + version_code as query parameters, nothing else is sent).
+     */
+    @NonNull
+    static Response check(@NonNull JUpdaterConfig config, @NonNull AppInfo app, @Nullable JSONObject payload)
+            throws IOException, JSONException {
+
+        String url = Uri.parse(config.getCustomServerUrl()).buildUpon()
+                .appendQueryParameter("pid", app.packageName)
+                .appendQueryParameter("version_code", Integer.toString(app.versionCode))
+                .build().toString();
+
+        if (url.regionMatches(true, 0, "http://", 0, 7)) {
+            JLogger.w("Update server is not using HTTPS; the response can be tampered with.");
+        }
+        JLogger.d(() -> "Checking " + url);
+
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         try {
-            String packageName = context.getPackageName();
-            int currentVersionCode = getAppVersionCode(context);
-            JLogger.debugLog("JUpdater Got AppVersionCode");
+            c.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            c.setReadTimeout(READ_TIMEOUT_MS);
+            c.setUseCaches(false);
+            c.setRequestProperty("Accept", "application/json");
 
-            HttpURLConnection connection = getHttpURLConnection(config, packageName, currentVersionCode, data);
-
-            int responseCode = connection.getResponseCode();
-            String responseMessage = connection.getResponseMessage();
-
-            if (responseCode == HttpURLConnection.HTTP_OK) {
-                BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-                StringBuilder jsonBuilder = new StringBuilder();
-                String line;
-
-                while ((line = reader.readLine()) != null) {
-                    jsonBuilder.append(line);
+            if (payload != null) {
+                byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+                c.setRequestMethod("POST");
+                c.setDoOutput(true);
+                c.setRequestProperty("x-api-key", config.getApiKey());
+                c.setRequestProperty("Content-Type", "application/json");
+                c.setFixedLengthStreamingMode(body.length);
+                try (OutputStream os = c.getOutputStream()) {
+                    os.write(body);
                 }
-
-                reader.close();
-                connection.disconnect();
-
-                // Parse JSON
-                JSONObject jsonObject = new JSONObject(jsonBuilder.toString());
-
-                String serverPid = jsonObject.getString("pid");
-                int serverVersionCode = jsonObject.getInt("version_code");
-                JLogger.debugLog("Data res : " + jsonObject.toString());
-
-                context.getSharedPreferences(var34sp, Context.MODE_PRIVATE).edit().
-                        putInt(var35sp, serverVersionCode).apply();
-
-                if (!packageName.equals(serverPid)) {
-                    throw new Exception("Package Name doesn't match");
-                }
-
-                JLogger.debugLog("Versions no : " + serverVersionCode);
-                JLogger.debugLog("Versions no : " + currentVersionCode);
-
-                if (serverVersionCode > currentVersionCode) {
-                    boolean isBlocked = jsonObject.getBoolean("is_blocked");
-                    if (isBlocked) throw new Exception("App Is Blocked");
-                    String updateUrl = jsonObject.getString("update_url");
-                    int force_update_gap = jsonObject.getInt("force_update_gap");
-                    config.setUpdatedApkUrl(updateUrl);
-                    config.enableForceUpdate(force_update_gap);
-                    JLogger.debugLog("Setting APK URL : " + updateUrl + " and threshold : " + force_update_gap);
-                    boolean isForce = config.isForceUpdateEnabled()
-                            && (serverVersionCode - currentVersionCode >= config.getForceUpdateThreshold());
-
-
-                    JLogger.debugLog("Launching " + (isForce ? "FORCE" : "NON-FORCE") + " update screen");
-                    JUpdaterCore.getInstance().launchUpdateScreen(isForce);
-
-                } else {
-                    JLogger.debugLog("You are using Latest version of the application.");
-                }
-
             } else {
-                JLogger.errorLog("Server response error: " + responseCode + "with message " + responseMessage);
+                c.setRequestMethod("GET");
             }
 
-        } catch (Exception e) {
-            JLogger.errorLog("Error while checking update: " + e.getLocalizedMessage());
-            if (e instanceof java.net.UnknownHostException ||
-                    e instanceof java.net.SocketTimeoutException ||
-                    e instanceof java.net.ConnectException) {
-                int savedServerVersionCode = context.getSharedPreferences(var34sp, Context.MODE_PRIVATE)
-                        .getInt(var35sp, 1);
-                int currentVersionCode = getAppVersionCode(context);
-
-                if (savedServerVersionCode > currentVersionCode) {
-                    boolean isForce = config.isForceUpdateEnabled()
-                            && (savedServerVersionCode - currentVersionCode >= config.getForceUpdateThreshold());
-
-                    JLogger.debugLog("Launching fallback " + (isForce ? "FORCE" : "NON-FORCE") + " update screen");
-                    JUpdaterCore.getInstance().launchUpdateScreen(isForce);
-                }
+            int code = c.getResponseCode();
+            if (code != HttpURLConnection.HTTP_OK) {
+                throw new HttpException(code);
             }
+
+            String json = readLimited(c.getInputStream());
+            JLogger.v(() -> "Response: " + json);
+            return parse(json, config);
+        } finally {
+            c.disconnect();
         }
     }
 
     @NonNull
-    private static HttpURLConnection getHttpURLConnection(JUpdaterConfig config, String packageName, int currentVersionCode, Map<String, Object> data) throws IOException {
-//        String finalServerUrl = config.getCustomServerUrl();
-//
-//        if (finalServerUrl==null||finalServerUrl.trim().isEmpty()){
-//            finalServerUrl = UPDATEVERSIONURL;
-//        }
+    private static Response parse(@NonNull String json, @NonNull JUpdaterConfig config) throws JSONException {
+        JSONObject o = new JSONObject(json);
+        int gap = o.has("force_update_gap")
+                ? Math.max(1, o.optInt("force_update_gap", 1))   // 0 or negative => always force
+                : config.getForceUpdateThreshold();
+        String title = o.optString("title", "").trim();
+        if (title.isEmpty()) {
+            title = "An update is available!";
+        }
 
-        // Prepare the URL with parameters
-        String urlString = config.getCustomServerUrl()
-                + "?pid=" + packageName
-                + "&version_code=" + currentVersionCode;
+        String message = o.optString("message", "").trim();
+        if (message.isEmpty()) {
+            message = "Please update the app to the latest\nversion to continue using it. This\n"
+                    + "update includes new features and improvements.";
+        }
+        return new Response(
+                o.getString("pid"),
+                o.getInt("version_code"),
+                o.optBoolean("is_blocked", false),
+                o.isNull("update_url") ? null : o.optString("update_url", null),
+                gap,
+                title,
+                message,
+                o.optBoolean("force_update", false)
+        );
+    }
 
-
-        JLogger.debugLog("JUpdater Final Url : " + urlString);
-
-        URL url = new URL(urlString);
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setDoOutput(true);
-        if (config.isUsingManagedServer()) {
-            byte[] var3 = convertMapToJson(data).getBytes();
-            int var14 = var3.length;
-            connection.setRequestProperty("Content-Length", String.valueOf(var14));
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("x-api-key", config.getApiKey());
-            connection.setRequestProperty("Content-Type", "application/json");
-
-            DataOutputStream var15 = null;
-            boolean var48 = false;
-
-            try {
-                var48 = true;
-                (var15 = new DataOutputStream(connection.getOutputStream())).write(var3);
-                var48 = false;
-            } finally {
-                if (var48) {
-                    if (var15 != null) {
-                        var15.close();
-                    }
-
+    @NonNull
+    private static String readLimited(@NonNull InputStream in) throws IOException {
+        try (InputStream is = in) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream(512);
+            byte[] buf = new byte[1024];
+            int n;
+            while ((n = is.read(buf)) != -1) {
+                out.write(buf, 0, n);
+                if (out.size() > MAX_RESPONSE_BYTES) {
+                    throw new IOException("Response too large");
                 }
             }
-
-            var15.close();
-            String var25 = url.toString();
-            JLogger.infoLog("response url: ".concat(String.valueOf(var25)));
-        } else {
-            connection.setRequestMethod("GET");
-        }
-        connection.setConnectTimeout(15000); // 15 seconds
-        connection.setReadTimeout(15000);    // 15 seconds
-
-        return connection;
-    }
-
-
-    private static int getAppVersionCode(Context context) {
-        try {
-            PackageInfo packageInfo = context.getPackageManager()
-                    .getPackageInfo(context.getPackageName(), 0);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                return (int) packageInfo.getLongVersionCode();
-            } else {
-                return packageInfo.versionCode;
-            }
-        } catch (PackageManager.NameNotFoundException e) {
-            return -1;
+            return out.toString("UTF-8");
         }
     }
-
-    public static String convertMapToJson(Map<String, Object> mapData) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{");
-        boolean first = true;
-        for (Map.Entry<String, Object> entry : mapData.entrySet()) {
-            if (!first) {
-                sb.append(",");
-            }
-            first = false;
-            String key = escapeString(entry.getKey());
-            Object value = entry.getValue();
-            String valueString = escapeString(value.toString());
-            sb.append("\"").append(key).append("\"").append(":").append("\"").append(valueString).append("\"");
-        }
-        sb.append("}");
-        return sb.toString();
-    }
-
-    private static String escapeString(String str) {
-        return str.replace("\"", "\\\"");
-    }
-
-
 }

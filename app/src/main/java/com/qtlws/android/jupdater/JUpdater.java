@@ -17,11 +17,9 @@ abstract public class JUpdater {
 
     public abstract void init(@NonNull Context context,JUpdaterConfig updaterConfig);
     public abstract void launchUrlInBrowser(@NonNull Context context,@NonNull String urlToOpen);
-    protected abstract void launchUpdateScreen(@NonNull boolean isForceUpdate);
 
     public static JUpdater getInstance(){
         return  JUpdaterCore.getInstance();
     }
-
 
 }

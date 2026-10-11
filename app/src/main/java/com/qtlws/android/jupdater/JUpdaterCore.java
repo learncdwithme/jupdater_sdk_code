@@ -8,24 +8,31 @@
 
 package com.qtlws.android.jupdater;
 
-import static com.qtlws.android.jupdater.Constants.INSTALLATION_ID;
-import static com.qtlws.android.jupdater.Constants.var34sp;
-
 
 import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+import org.json.JSONObject;
+
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Handler;
-import android.os.Looper;
 import android.provider.Settings;
-
-import androidx.annotation.NonNull;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -39,57 +46,80 @@ import java.util.UUID;
 class JUpdaterCore extends JUpdater {
 
 
-    private static JUpdaterCore var1xi;
-
     public static final String SDKNAME = BuildConfig.SDK_NAME;
     public static final String VERSION = BuildConfig.VERSION;
     public static final String BUILDNUMBER = BuildConfig.BUILDNUMBER;
 
-    private static JThread var5tdx;
-
-    private static Context var2xct;
-    private static Context var2;
-    private static JUpdaterConfig config;
-    private boolean var111x = true;
+    private static final JUpdaterCore INSTANCE = new JUpdaterCore();
 
 
-    static {
-        var1xi = new JUpdaterCore();
+    /** At most one worker thread, created on demand and released after 30s of idleness. */
+    private static final ThreadPoolExecutor EXECUTOR = new ThreadPoolExecutor(
+            0, 1, 30L, TimeUnit.SECONDS, new LinkedBlockingQueue<>(),
+            r -> {
+                Thread t = new Thread(r, "JUpdater-check");
+                t.setDaemon(true);
+                t.setPriority(Thread.MIN_PRIORITY);
+                return t;
+            });
+
+    private final AtomicBoolean checkInFlight = new AtomicBoolean(false);
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private volatile Context appContext;
+    private volatile JUpdaterConfig config;
+    private volatile UpdateStore store;
+
+    public static JUpdater getInstance() {
+        return INSTANCE;
+    }
+
+    private JUpdaterCore() {
     }
 
 
     @Override
     public void init(@NonNull Context context, JUpdaterConfig updaterConfig) {
         try {
-
-            if (updaterConfig.getUpdatedApkUrl() == null || updaterConfig.getUpdatedApkUrl().trim().isEmpty()) {
-                throw new IllegalArgumentException("Update APK URL is missing or empty. SDK initialization failed.");
+            JLogger.setLevel(updaterConfig.getLogLevel());
+            Context app = context.getApplicationContext();
+            if (!(app instanceof Application)) {
+                JLogger.e("init() needs a Context with an Application. SDK not started.");
+                return;
             }
-            var2 = context;
-            var2xct = context.getApplicationContext();
-            config = updaterConfig;
-            JLogger.var36dgx = config.isDebug();
-            JLogger.infoLog("Init Successfully");
-            JLogger.infoLog(String.format("Starting JUpdater Service: (v%s.%s)", VERSION, BUILDNUMBER));
-            JLogger.infoLog(("Build Number: " + BUILDNUMBER));
 
-            if (JLifecycleListener.listener == null) {
-                JLifecycleListener.$$b(var2xct, new JLifecycleListener.ForegroundListener() {
-                    @Override
-                    public void onAppForeground(Activity var1) {
-                        JLogger.infoLog("onBecameForeground");
-                        startService();
-                    }
+            // Only application-scoped objects are retained (no Activity leaks).
+            this.appContext = app;
+            this.config = updaterConfig;
+            if (store == null) {
+                store = new UpdateStore(app);
+            }
 
-                    @Override
-                    public void onAppBackground(Context var1) {
-                        JLogger.infoLog("onBecameBackground");
-                    }
-                });
+            JLogger.i("Init Successfully");
+            JLogger.i(String.format("Starting %s v%s (build %s), mode: %s", SDKNAME, VERSION, BUILDNUMBER,
+                    updaterConfig.isUsingManagedServer() ? "managed" : "custom"));
+
+            JLifecycleListener.register((Application) app, new JLifecycleListener.Callback() {
+                @Override
+                public void onAppForeground() {
+                    JLogger.d("App in foreground");
+                    scheduleCheck();
+                }
+
+                @Override
+                public void onAppBackground() {
+                    JLogger.d("App in background");
+                }
+            });
+
+            // init() called from an already visible Activity: don't wait for the next foreground.
+            // Duplicate triggers are absorbed by the in-flight guard and the check interval.
+            if (context instanceof Activity) {
+                scheduleCheck();
             }
 
         } catch (Exception e) {
-            JLogger.errorLog("[Error] While init " + e.getLocalizedMessage());
+            JLogger.e("[Error] While init " + e.getLocalizedMessage());
         }
 
 
@@ -97,167 +127,140 @@ class JUpdaterCore extends JUpdater {
 
     @Override
     public void launchUrlInBrowser(@NonNull Context context, @NonNull String urlToOpen) {
-        try {
-
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(urlToOpen));
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            JLogger.infoLog("Launching :- " + urlToOpen);
-            context.startActivity(intent);
-        } catch (Exception e) {
-            JLogger.errorLog(e);
-        }
+        UrlLauncher.open(context.getApplicationContext(), urlToOpen);
     }
 
-
-    private void startService() {
-        if (var2 instanceof Application) {
-            JLogger.debugLog("Application context is found");
-        } else if (var2 instanceof Activity) {
-            JLogger.debugLog("Activity context is found");
-        } else {
-            JLogger.debugLog("Unknown context is found");
-        }
-        JLogger.debugLog("JUpdater initialized with URL: " + config.getUpdatedApkUrl());
-        var5tdx = new JThread(() -> {
-            Map<String,Object> data = startCollectionData();
-            UpdateChecker.checkForUpdate(var2xct, config,data);
-        });
-        var5tdx.start();
-    }
-
-    private Map<String, Object> startCollectionData() {
-
-        Map<String, Object> var0 = new HashMap<>();
-        try {
-            var0.put("uid", createUid());
-            var0.put("apiKey", config.getApiKey());
-            var0.put("build_number", VERSION);
-            var0.put("brand", Build.BRAND);
-            var0.put("device", Build.DEVICE);
-            var0.put("os_version", Build.VERSION.RELEASE);
-            var0.put("model", Build.MODEL);
-            var0.put("manufacturer", Build.MANUFACTURER);
-            var0.put("mainboard", Build.BOARD);
-            var0.put("country", Locale.getDefault().getCountry());
-            try {
-                PackageInfo var84 = var2xct.getPackageManager().getPackageInfo(var2xct
-                        .getPackageName(), PackageInfo.INSTALL_LOCATION_AUTO);
-
-                var0.put("package_name", var2xct.getPackageName());
-                var0.put("app_version_code", Integer.toString(var84.versionCode));
-                var0.put("app_version_name", var84.versionName);
-                var0.put("firstInstallTime", JDateFormat.getDataFormatter("yyyy-MM-dd_HHmmssZ").
-                        format(new Date(var84.firstInstallTime)));
-
-            } catch (Exception var63) {
-                JLogger.errorLog("Exception while collecting app version data " + var63.getLocalizedMessage());
-            }
-
-            try {
-                String var2 = Settings.Secure.getString(var2xct.getContentResolver(), "android_id");
-                var0.put("android_id", var2);
-                var0.put("sdk", Integer.toString(Build.VERSION.SDK_INT));
-            } catch (Exception e) {
-                JLogger.errorLog("[Error] while collecting android id" + e.getLocalizedMessage());
-            }
-
-        } catch (Exception e) {
-            JLogger.errorLog("[Error] while collecting data" + e.getLocalizedMessage());
-        }
-        JLogger.debugLog(var0.toString());
-        return var0;
-//        try {
-//            JEvent var0x = new JEvent();
-//            var0x.addParams(var0);
-//            var0x.context(var2xct);
-//            var0x.Url(INTSALLCOUNTURL);
-//            JDB.$$B(var0x);
-//        } catch (Exception e) {
-//            JLogger.errorLog("[Error] while sending request " + e.getLocalizedMessage());
-//        }
-    }
-
-    private static final String PRST = "lcbyTKasUajAKasAlenm78ac9w2";
-
-    private static long getAppInstallTime(Context context) {
-        try {
-            PackageInfo packageInfo = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
-            return packageInfo.firstInstallTime;
-        } catch (PackageManager.NameNotFoundException e) {
-            return System.currentTimeMillis();
-        }
-    }
-
-    private static String generateSha256Uuid(String source) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hashBytes = digest.digest(source.getBytes(StandardCharsets.UTF_8));
-            return UUID.nameUUIDFromBytes(hashBytes).toString();
-        } catch (NoSuchAlgorithmException e) {
-            return UUID.nameUUIDFromBytes(source.getBytes(StandardCharsets.UTF_8)).toString();
-        }
-    }
-
-    private String createUid() {
-        SharedPreferences var0 = getSharedPreferences(var2xct);
-        String installedUser = var0.getString(INSTALLATION_ID, null);
-        if (installedUser != null) {
-            return installedUser;
+    private void scheduleCheck() {
+        if (config == null || appContext == null) return;
+        if (!checkInFlight.compareAndSet(false, true)) {
+            JLogger.d("Check already running, skipping");
+            return;
         }
         try {
-            String model = Build.MANUFACTURER.replace(" ", "-");
-            installedUser = getAppInstallTime(var2xct) + "-" +
-                    var2xct.getPackageName() + "-" + model + "-" + PRST;
-            installedUser = generateSha256Uuid(installedUser);
-        } catch (Exception e) {
-            JLogger.errorLog("[Error] While creating id " + e.getLocalizedMessage());
-            installedUser = String.valueOf(System.currentTimeMillis() + "-" + var2xct.getPackageName());
-
-        }
-        var0.edit().putString(INSTALLATION_ID, installedUser).apply();
-        return installedUser;
-    }
-
-    private static SharedPreferences getSharedPreferences(Context var0) {
-        return var0.getSharedPreferences(var34sp, Context.MODE_PRIVATE);
-    }
-
-    @Override
-    protected void launchUpdateScreen(@NonNull boolean isForceUpdate) {
-        try {
-            new Handler(Looper.getMainLooper()).post(() -> {
-                if (isForceUpdate) {
-                    if (var111x) {
-                        Intent intent = new Intent(var2xct, UpdateBlocking.class);
-                        intent.putExtra("update_url", config.getUpdatedApkUrl());
-                        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        var2xct.startActivity(intent);
-                        var111x = false;
-                    } else {
-                        if (JLifecycleListener.getCurrentActivity() instanceof UpdateBlocking) {
-                            JLogger.debugLog("OK_111x");
-                        } else {
-                            var111x = true;
-                            launchUpdateScreen(true);
-                        }
-                    }
-                } else {
-                    JUpdateSheetController.launch(config);
+            EXECUTOR.execute(() -> {
+                try {
+                    runCheck();
+                } catch (Throwable t) {
+                    JLogger.e("Update check failed", t);
+                } finally {
+                    checkInFlight.set(false);
                 }
             });
-            if (var5tdx != null) {
-                var5tdx.interrupt();
-                var5tdx = null;
-            }
-        } catch (Exception e) {
-            JLogger.errorLog("[Error] While Closing Thread " + e.getLocalizedMessage());
+        } catch (RuntimeException e) {
+            checkInFlight.set(false);
+            JLogger.e("Could not schedule update check", e);
+        }
+    }
+    /** Runs on the worker thread. */
+    private void runCheck() {
+        final Context ctx = appContext;
+        final JUpdaterConfig cfg = config;
+        final UpdateStore st = store;
+        if (ctx == null || cfg == null || st == null) return;
+
+        final AppInfo app = AppInfo.read(ctx);
+        if (app.versionCode < 0) {
+            JLogger.w("Unknown app version code, skipping update check");
+            return;
         }
 
+        final long now = System.currentTimeMillis();
+        final UpdateStore.ServerState cached = st.load();
+        final long last = st.lastCheckTime();
+
+        // Throttle: answer from the last server response instead of hitting the network again.
+        if (cached != null && now >= last && now - last < cfg.getMinCheckIntervalMs()) {
+            JLogger.d("Using cached server state (check interval not elapsed)");
+            evaluate(cfg, app, cached);
+            return;
+        }
+
+        try {
+            JSONObject payload = cfg.isUsingManagedServer()
+                    ? DeviceData.collect(app, st.installationId(), cfg.getApiKey())
+                    : null;
+            JLogger.v(() -> "Payload: " + maskKey(payload, cfg));
+
+            UpdateChecker.Response r = UpdateChecker.check(cfg, app, payload);
+
+            if (!app.packageName.equals(r.pid)) {
+                JLogger.w("Server pid does not match this app's package name, ignoring response");
+                return;
+            }
+
+            UpdateStore.ServerState fresh =
+                    new UpdateStore.ServerState(r.versionCode, r.updateUrl, r.forceGap, r.blocked, r.title,r.message,r.isForceUpdate);
+            st.save(fresh, now);
+            evaluate(cfg, app, fresh);
+
+        } catch (UpdateChecker.HttpException e) {
+            JLogger.e("Server responded with " + e.getMessage());
+            // 4xx (bad key, unknown app, ...) must not resurrect stale state; 5xx is treated as offline.
+            if (e.code >= 500 && cached != null) {
+                evaluate(cfg, app, cached);
+            }
+        } catch (java.io.IOException e) {
+            JLogger.w("Network unavailable (" + e.getClass().getSimpleName() + "), using last known state");
+            if (cached != null) {
+                evaluate(cfg, app, cached);
+            }
+        } catch (Exception e) {
+            JLogger.e("Update check error", e);
+        }
+    }
+    private void evaluate(@NonNull JUpdaterConfig cfg, @NonNull AppInfo app, @NonNull UpdateStore.ServerState s) {
+        if (s.blocked) {
+            JLogger.w("App is disabled on the update server, no update UI will be shown");
+            return;
+        }
+        JLogger.d(() -> "Server version " + s.versionCode + ", installed " + app.versionCode);
+        if (s.versionCode <= app.versionCode) {
+            JLogger.d("Already on the latest version");
+            return;
+        }
+
+        String url = s.updateUrl != null ? s.updateUrl : cfg.getFallbackApkUrl();
+//        if (!UrlLauncher.isHttpUrl(url)) {
+//            JLogger.w("No valid http(s) update URL available, not showing update UI");
+//            return;
+//        }
+
+        int threshold = s.forceGap >= 1 ? s.forceGap : cfg.getForceUpdateThreshold();
+        boolean force =  s.isForceUpdate|| (s.versionCode - app.versionCode > threshold);
+        JLogger.i("Update available -> " + (force ? "FORCE" : "optional"));
+        assert url != null;
+        showUpdateUi(url, force,s.title,s.message);
     }
 
-    public static JUpdater getInstance() {
-        return var1xi;
+    private void showUpdateUi(@NonNull String url, boolean force,String title,String message) {
+        mainHandler.post(() -> {
+            try {
+                if (force) {
+                    launchBlockingScreen(url,title,message);
+                } else {
+                    JUpdateSheetController.show(url,title,message);
+                }
+            } catch (Exception e) {
+                JLogger.e("Could not show update UI", e);
+            }
+        });
     }
 
-
+    private void launchBlockingScreen(@NonNull String url,String title,String message) {
+        Context ctx = appContext;
+        if (ctx == null || UpdateBlocking.isShowing()) return;
+        Intent intent = new Intent(ctx, UpdateBlocking.class);
+        intent.putExtra(Constants.EXTRA_UPDATE_URL, url);
+        intent.putExtra(Constants.EXTRA_TITLE, title);
+        intent.putExtra(Constants.EXTRA_MESSAGE, message);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        ctx.startActivity(intent);
+    }
+    @Nullable
+    private static String maskKey(@Nullable JSONObject payload, @NonNull JUpdaterConfig cfg) {
+        if (payload == null) return "(none, custom mode)";
+        String s = payload.toString();
+        String key = cfg.getApiKey();
+        return key != null ? s.replace(key, "***") : s;
+    }
 }

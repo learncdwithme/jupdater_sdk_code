@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2026 JUpdater
  *
@@ -10,123 +9,85 @@ package com.qtlws.android.jupdater;
 
 import android.app.Activity;
 import android.app.Application;
-import android.content.Context;
 import android.os.Bundle;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.annotation.VisibleForTesting;
 
 import java.lang.ref.WeakReference;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-class JLifecycleListener {
+/**
+ * Detects app foreground/background by counting started activities. All callbacks arrive on the
+ * main thread, so no timers, executors or locks are needed.
+ */
+final class JLifecycleListener implements Application.ActivityLifecycleCallbacks {
 
-    @VisibleForTesting
-    public static long CHECK_DELAY = 500L;
-    protected static ForegroundListener listener;
+    interface Callback {
+        void onAppForeground();
 
-    private static WeakReference<Activity> currentActivityRef = null;
-
-    protected static Activity getCurrentActivity() {
-        return currentActivityRef != null ? currentActivityRef.get() : null;
+        void onAppBackground();
     }
 
+    private static final AtomicBoolean registered = new AtomicBoolean(false);
+    private static volatile WeakReference<Activity> resumedActivity;
 
-    protected interface ForegroundListener {
+    private final Callback callback;
+    private int startedCount = 0;
 
-        void onAppForeground(Activity var1);
-
-        void onAppBackground(Context var1);
+    private JLifecycleListener(Callback callback) {
+        this.callback = callback;
     }
 
-    protected static void $$b(Context var0, final ForegroundListener var1) {
-        listener = var1;
-
-        Application.ActivityLifecycleCallbacks var2 = new Application.ActivityLifecycleCallbacks() {
-            boolean isResume;
-            boolean isPause = true;
-            private Executor ex = Executors.newSingleThreadExecutor();
-
-            @Override
-            public void onActivityCreated(@NonNull Activity activity, @Nullable Bundle bundle) {
-
-            }
-
-            @Override
-            public void onActivityStarted(@NonNull Activity activity) {
-
-            }
-
-            @Override
-            public void onActivityResumed(@NonNull Activity var1x) {
-                currentActivityRef = new WeakReference<>(var1x);
-                this.ex.execute(() -> {
-                    if (!isResume) {
-                        try {
-                            var1.onAppForeground(var1x);
-                        } catch (Exception var212) {
-                            JLogger.errorLog("Listener thrown an exception: " + var212.getLocalizedMessage());
-                        }
-                    }
-
-                    isPause = false;
-                    isResume = true;
-                });
-            }
-
-            @Override
-            public void onActivityPaused(@NonNull Activity var1x) {
-                if (currentActivityRef != null && currentActivityRef.get() == var1x) {
-                    currentActivityRef.clear();
-                }
-                this.ex.execute(() -> {
-                    isPause = true;
-                    final Context var1xx = var1x.getApplicationContext();
-
-                    try {
-                        (new Timer()).schedule(new TimerTask() {
-                            public void run() {
-                                if (isResume && isPause) {
-                                    isResume = false;
-
-                                    try {
-                                        var1.onAppBackground(var1xx);
-                                        return;
-                                    } catch (Exception var21) {
-                                        JLogger.errorLog("Listener threw exception! " + var21.getLocalizedMessage());
-                                    }
-                                }
-
-                            }
-                        }, JLifecycleListener.CHECK_DELAY);
-                    } catch (Throwable var3) {
-                        JLogger.errorLog("Background task failed with a throwable: " + var3.getLocalizedMessage());
-                    }
-                });
-            }
-
-            @Override
-            public void onActivityStopped(@NonNull Activity activity) {
-
-            }
-
-            @Override
-            public void onActivitySaveInstanceState(@NonNull Activity activity, @NonNull Bundle bundle) {
-
-            }
-
-            @Override
-            public void onActivityDestroyed(@NonNull Activity activity) {
-
-            }
-        };
-        if (var0 instanceof Activity) {
-            var2.onActivityResumed((Activity) var0);
+    /** Registers once per process. */
+    static void register(@NonNull Application app, @NonNull Callback callback) {
+        if (registered.compareAndSet(false, true)) {
+            app.registerActivityLifecycleCallbacks(new JLifecycleListener(callback));
         }
-        ((Application) var0.getApplicationContext()).registerActivityLifecycleCallbacks(var2);
+    }
+
+    @Nullable
+    static Activity getCurrentActivity() {
+        WeakReference<Activity> ref = resumedActivity;
+        return ref != null ? ref.get() : null;
+    }
+
+    @Override
+    public void onActivityStarted(@NonNull Activity activity) {
+        if (startedCount++ == 0) {
+            callback.onAppForeground();
+        }
+    }
+
+    @Override
+    public void onActivityStopped(@NonNull Activity activity) {
+        if (startedCount > 0 && --startedCount == 0) {
+            callback.onAppBackground();
+        }
+    }
+
+    @Override
+    public void onActivityResumed(@NonNull Activity activity) {
+        resumedActivity = new WeakReference<>(activity);
+    }
+
+    @Override
+    public void onActivityPaused(@NonNull Activity activity) {
+        WeakReference<Activity> ref = resumedActivity;
+        if (ref != null && ref.get() == activity) {
+            resumedActivity = null;
+        }
+    }
+
+    @Override
+    public void onActivityCreated(@NonNull Activity activity, @Nullable Bundle savedInstanceState) {
+    }
+
+    @Override
+    public void onActivitySaveInstanceState(@NonNull Activity activity, @NonNull Bundle outState) {
+    }
+
+    @Override
+    public void onActivityDestroyed(@NonNull Activity activity) {
     }
 }

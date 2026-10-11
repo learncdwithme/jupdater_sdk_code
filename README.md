@@ -69,16 +69,13 @@ That’s where `JUpdater` comes in. It becomes your custom, flexible, and lightw
 
 ---
 
-### 🔐 Privacy First — No Data Collection
 
-Your privacy and your users' privacy are **top priorities**. `JUpdater` does **not collect any personal data**, analytics, or background telemetry.
+### 🔐 Privacy & Data
 
-- No tracking
-- No user fingerprinting
-- No crash reporting
-- No third-party data sharing
+- **Custom server mode:** nothing but `pid` and `version_code` is sent, and only to your own server.
+- **Managed mode:** device and app information (no Android ID) is sent to the managed server so the dashboard can show update insights. Full field list: [PRIVACY.md](PRIVACY.md).
 
-We provide a simple update service — nothing more, nothing less. You stay fully in control of your data and your users’ experience.
+You are responsible for mentioning this in your app's privacy policy and for obtaining consent where GDPR / ePrivacy require it (call `init()` only after consent). See [PRIVACY.md](PRIVACY.md).
 
 ---
 
@@ -396,10 +393,10 @@ With `JUpdater`:
 - Your app can be **freely distributed** from any source
 - Users always get notified when updates are available
 - You avoid bloat by skipping heavy SDK integrations
-- You retain **full privacy** and **zero tracking**
+= You stay in control of what is sent (see PRIVACY.md)
 - Your project remains **lightweight, fast, and developer-first**
 
-> 🛠️ JUpdater is built by devs for devs — especially those who want full control of their distribution and update strategy. No gatekeepers, no vendor lock-in, no data collection.
+> 🛠️ JUpdater is built by devs for devs — especially those who want full control of their distribution and update strategy. No gatekeepers, no vendor lock-in.
 
 ---
 

@@ -15,62 +15,23 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
-public class Constants {
+final class Constants {
 
 
-    public static final String var34sp = "j_updater_pref";
-    public static final String var35sp = "j_updater_version";
+    public static final String PREFS = "j_updater_pref";
     public static final String INSTALLATION_ID = "installation_id";
-    public static String DATA = "data";
+    static final String KEY_SERVER_VERSION = "j_updater_version";
+    static final String KEY_UPDATE_URL = "j_updater_url";
+    static final String KEY_FORCE_GAP = "j_updater_gap";
+    static final String KEY_BLOCKED = "j_updater_blocked";
+    static final String KEY_LAST_CHECK = "j_updater_last_check";
+    static final String KEY_TITLE = "j_updater_title";
+    static final String KEY_MESSAGE = "j_updater_message";
+    static final String KEY_ISFORCEUPDATE = "j_updater_force_update";
 
-    public static String mapToString(Map<String, Object> map) {
-        String r0 = new JSONObject(map).toString();
-        String _r1 = r0.replaceAll("\\p{C}", "*Non-printing character*");
-        boolean _r2 = _r1.equals(r0);
-        if (!_r2) {
-            JLogger.infoLog("Payload contains non-printing characters");
-            r0 = _r1;
-        }
-            JLogger.infoLog("Payload saved");
-        return r0;
-    }
-
-    public static Map<String, Object> stringToMap(String s) {
-        try {
-            Map<String,Object> map = new HashMap<>();;
-            JSONObject jsonObject = new JSONObject(s);
-            Iterator<String> keysItr = jsonObject.keys();
-            while(keysItr.hasNext()) {
-                String key = keysItr.next();
-                Object value = jsonObject.get(key);
-                if (value instanceof JSONObject) {
-                    value = stringToMap((JSONObject) value);
-                }
-                map.put(key, value);
-            }
-            JLogger.debugLog("data = "+map.toString());
-            return map;
-        } catch (JSONException e) {
-            JLogger.errorLog("[Error] While converting Map "+e.getLocalizedMessage());
-            return null;
-        }
-    }
-    public static Map<String, Object> stringToMap(JSONObject jsonObject) {
-        try {
-            Map<String,Object> map = new HashMap<>();;
-            Iterator<String> keysItr = jsonObject.keys();
-            while(keysItr.hasNext()) {
-                String key = keysItr.next();
-                Object value = jsonObject.get(key);
-                if (value instanceof JSONObject) {
-                    value = stringToMap((JSONObject) value);
-                }
-                map.put(key, value);
-            }
-            return map;
-        } catch (JSONException e) {
-            JLogger.errorLog("[Error] While converting Map jsonObject"+e.getLocalizedMessage());
-            return null;
-        }
+    public static final String EXTRA_UPDATE_URL = "update_url";
+    public static final String EXTRA_TITLE = "updater_title";
+    public static final String EXTRA_MESSAGE = "updater_message";
+    private Constants() {
     }
 }

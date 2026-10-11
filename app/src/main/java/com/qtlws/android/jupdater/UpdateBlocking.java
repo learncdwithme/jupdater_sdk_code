@@ -8,15 +8,21 @@
 
 package com.qtlws.android.jupdater;
 
+import static com.qtlws.android.jupdater.Constants.EXTRA_MESSAGE;
+import static com.qtlws.android.jupdater.Constants.EXTRA_TITLE;
+import static com.qtlws.android.jupdater.Constants.EXTRA_UPDATE_URL;
+
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 
 
 import androidx.activity.EdgeToEdge;
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -24,12 +30,19 @@ import androidx.core.view.WindowInsetsCompat;
 
 public class UpdateBlocking extends AppCompatActivity {
 
-    private long lastBackPressedTime = 0;
     private static final int EXIT_INTERVAL = 2000;
+    private static volatile boolean showing = false;
+
+    private long lastBackPressedTime = 0;
+
+    static boolean isShowing() {
+        return showing;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        showing = true;
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_update_blocking);
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
@@ -38,33 +51,42 @@ public class UpdateBlocking extends AppCompatActivity {
             return insets;
         });
 
+        final String apkUrl = getIntent().getStringExtra(EXTRA_UPDATE_URL);
+        final String title = getIntent().getStringExtra(EXTRA_TITLE);
+        final String message = getIntent().getStringExtra(EXTRA_MESSAGE);
         Button updateBtn = findViewById(R.id.updateApp);
         Button closeAppBtn = findViewById(R.id.closeApp);
+        TextView titleTV = findViewById(R.id.updateMessage);
+        TextView messageTV = findViewById(R.id.updateExplanation);
 
-        updateBtn.setOnClickListener(v -> {
-            String apkUrl = getIntent().getStringExtra("update_url");;
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl));
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-        });
+        titleTV.setText(title);
+        messageTV.setText(message);
+
+        updateBtn.setOnClickListener(v -> UrlLauncher.open(this, apkUrl));
 
         closeAppBtn.setOnClickListener(v -> {
             finishAffinity();
             System.exit(0);
         });
 
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                long now = System.currentTimeMillis();
+                if (now - lastBackPressedTime < EXIT_INTERVAL) {
+                    finishAffinity();
+                } else {
+                    Toast.makeText(UpdateBlocking.this, "Press again to exit", Toast.LENGTH_SHORT).show();
+                    lastBackPressedTime = now;
+                }
+            }
+        });
+
     }
 
-    @SuppressLint("MissingSuperCall")
     @Override
-    public void onBackPressed() {
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - lastBackPressedTime < EXIT_INTERVAL) {
-            finishAffinity();
-            System.exit(0);
-        } else {
-            Toast.makeText(this, "Press again to exit", Toast.LENGTH_SHORT).show();
-            lastBackPressedTime = currentTime;
-        }
+    protected void onDestroy() {
+        showing = false;
+        super.onDestroy();
     }
 }
