@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) 2026 JUpdater
  *
@@ -8,35 +7,65 @@
 
 package com.qtlws.android.jupdater;
 
-import static com.qtlws.android.jupdater.JUpdaterCore.SDKNAME;
-import static com.qtlws.android.jupdater.JUpdaterCore.VERSION;
-
 import android.util.Log;
 
-class JLogger {
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
-    private static String TAG = SDKNAME + "_V" + VERSION;
+import java.util.function.Supplier;
 
-    protected static boolean var36dgx = false;
+/**
+ * Level-gated logger. The {@link Supplier} overloads avoid building expensive
+ * strings when the level is disabled.
+ */
+final class JLogger {
 
-    public static void errorLog(Object s) {
-        Log.e(TAG, s.toString());
+    private static final int MAX_TAG_LENGTH = 23; // limit on API < 26
+    private static final String TAG = buildTag();
+
+    private static volatile JLogLevel level = JLogLevel.WARN;
+
+    private JLogger() {
     }
 
-    public static void debugLog(Object s) {
-        if (var36dgx) {
-            Log.d(TAG, s.toString());
-        }
+    private static String buildTag() {
+        String tag = BuildConfig.SDK_NAME + "_V" + BuildConfig.VERSION;
+        return tag.length() > MAX_TAG_LENGTH ? tag.substring(0, MAX_TAG_LENGTH) : tag;
     }
 
-    public static void verboseLog(Object s) {
-        if (var36dgx) {
-            Log.v(TAG, s.toString());
-        }
+    static void setLevel(@Nullable JLogLevel newLevel) {
+        level = newLevel != null ? newLevel : JLogLevel.WARN;
     }
 
-    public static void infoLog(Object s) {
-        Log.i(TAG, s.toString());
+    static boolean isEnabled(@NonNull JLogLevel messageLevel) {
+        return messageLevel != JLogLevel.NONE && level.priority >= messageLevel.priority;
     }
 
+    static void e(@Nullable Object msg) {
+        if (isEnabled(JLogLevel.ERROR)) Log.e(TAG, String.valueOf(msg));
+    }
+
+    static void e(@Nullable Object msg, @Nullable Throwable t) {
+        if (isEnabled(JLogLevel.ERROR)) Log.e(TAG, String.valueOf(msg), t);
+    }
+
+    static void w(@Nullable Object msg) {
+        if (isEnabled(JLogLevel.WARN)) Log.w(TAG, String.valueOf(msg));
+    }
+
+    static void i(@Nullable Object msg) {
+        if (isEnabled(JLogLevel.INFO)) Log.i(TAG, String.valueOf(msg));
+    }
+
+    static void d(@Nullable Object msg) {
+        if (isEnabled(JLogLevel.DEBUG)) Log.d(TAG, String.valueOf(msg));
+    }
+
+    static void d(@NonNull Supplier<String> msg) {
+        if (isEnabled(JLogLevel.DEBUG)) Log.d(TAG, msg.get());
+    }
+
+    static void v(@NonNull Supplier<String> msg) {
+        if (isEnabled(JLogLevel.VERBOSE)) Log.v(TAG, msg.get());
+    }
 }

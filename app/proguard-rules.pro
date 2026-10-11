@@ -20,3 +20,11 @@
 -keep public class com.qtlws.android.jupdater.UpdateBlocking {
     public <init>(...);
 }
+
+-keep public class com.qtlws.android.jupdater.JUpdaterConfig {
+    public *;
+}
+-keep public enum com.qtlws.android.jupdater.JLogLevel {
+    *;
+}
+

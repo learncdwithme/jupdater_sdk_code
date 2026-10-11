@@ -13,6 +13,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#DDEBF6"
+    android:isScrollContainer="true"
     tools:context=".UpdateBlocking">
 
 
@@ -86,7 +87,7 @@
         android:layout_marginTop="10dp"
         android:layout_marginBottom="24dp"
         android:background="#00FFFFFF"
-        android:gravity="center"
+        android:gravity="start"
         android:text="Please Update the app to the latest\nversion to continue using it. This\nupdate includes new features and improvements."
         android:textColor="#121212"
         android:textSize="18sp"

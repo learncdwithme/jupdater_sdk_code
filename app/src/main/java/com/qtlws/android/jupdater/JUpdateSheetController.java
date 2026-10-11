@@ -10,24 +10,22 @@ package com.qtlws.android.jupdater;
 
 import android.app.Activity;
 
-class JUpdateSheetController {
+import androidx.annotation.NonNull;
+
+final class JUpdateSheetController {
 
     private static boolean hasSheetShown = false;
-    private static String updateUrl;
 
-    public static void launch(JUpdaterConfig var6xc) {
-        updateUrl = var6xc.getUpdatedApkUrl();
-        Activity var1xc = JLifecycleListener.getCurrentActivity();
-
-        if (var1xc != null && !var1xc.isFinishing()) {
-            showBottomSheet(var1xc);
-        }
+    private JUpdateSheetController() {
     }
 
-
-    private static void showBottomSheet(Activity activity) {
-        if (hasSheetShown || activity == null || activity.isFinishing()) return;
+    static void show(@NonNull String updateUrl,@NonNull String t,@NonNull String m) {
+        if (hasSheetShown) return;
+        Activity activity = JLifecycleListener.getCurrentActivity();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+            return; // retried on the next foreground
+        }
         hasSheetShown = true;
-        JUpdateBottomSheet.show(activity, updateUrl);
+        JUpdateBottomSheet.show(activity, updateUrl,t,m);
     }
 }

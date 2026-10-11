@@ -27,8 +27,8 @@ if (localPropertiesFile.exists()) {
 // Clean raw strings loaded from local.properties if they include escaped quotes
 fun String.unquote(): String = this.removeSurrounding("\"")
 var sdkName  = localProperties.getProperty("SDK_NAME", "JUpdater").unquote()
-var sdkVersion = localProperties.getProperty("VERSION", "1.0.0").unquote()
-val buildNumber = localProperties.getProperty("BUILDNUMBER", "1").unquote()
+var sdkVersion = localProperties.getProperty("VERSION", "2.3.1").unquote()
+val buildNumber = localProperties.getProperty("BUILDNUMBER", "8").unquote()
 
 // Set root Maven coordinates for JitPack
 group = "com.github.vijayjvvc"
@@ -74,19 +74,19 @@ android {
         }
     }
 
-//    // Optional: To generate consistent filenames
-//    libraryVariants.all {
-//        outputs.all {
-//            val output = this as com.android.build.gradle.internal.api.LibraryVariantOutputImpl
-//            val variantName = output.baseName.replaceFirstChar {
-//                if (it.isLowerCase()) it.titlecase(
-//                    Locale.getDefault()
-//                ) else it.toString()
-//            }
-////            val buildType = output.b.name.capitalize()
-//            output.outputFileName = "jupdater-V${version}-${variantName.toLowerCase()}.aar"
-//        }
-//    }
+    // Optional: To generate consistent filenames
+    libraryVariants.all {
+        outputs.all {
+            val output = this as com.android.build.gradle.internal.api.LibraryVariantOutputImpl
+            val variantName = output.baseName.replaceFirstChar {
+                if (it.isLowerCase()) it.titlecase(
+                    Locale.getDefault()
+                ) else it.toString()
+            }
+//            val buildType = output.b.name.capitalize()
+            output.outputFileName = "jupdater-V${version}-${variantName.toLowerCase()}.aar"
+        }
+    }
 
 
 }
